@@ -14,6 +14,7 @@ setup(
         ('share/' + package_name, ['package.xml']),
         (os.path.join('share', package_name), glob('launch/*launch.[pxy][yma]*')),
         (os.path.join('share', package_name, 'config'), glob('config/*.[yma]*')),
+        (os.path.join('share', package_name, 'config'), glob('config/*.pt')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -25,6 +26,8 @@ setup(
     entry_points={
         'console_scripts': [
             'stereo_location = stereo_location.stereo_location:main',
+            'object_location = stereo_location.object_location:main',
+            'robot_location = stereo_location.robot_location:main',
         ],
     },
 )
