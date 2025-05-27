@@ -78,6 +78,7 @@ class RobotLocationNode(OakSubscriber):
                         
                         # Convert rotation vector to a rotation matrix
                         R_aruco_optical, _ = cv2.Rodrigues(rvec)
+                        R_aruco_optical[2, :] = [0, 0, -1] # Fix z axis orientation 
 
                         # Transformation from optical frame to camera frame TODO: Get this from tf
                         R_camera_optical = np.array([

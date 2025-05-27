@@ -5,7 +5,8 @@ from ament_index_python.packages import get_package_share_directory
 from pathlib import Path
 
 from stereo_location.oak_subscriber import OakSubscriber
-from stereo_location.utils import SpatialCalculator
+from geometry_msgs.msg import TransformStamped
+from tf2_ros import TransformBroadcaster
 
 
 class ObjectLocationNode(OakSubscriber):
@@ -27,6 +28,15 @@ class ObjectLocationNode(OakSubscriber):
         self.model_vegetables.eval()
         self.names_containers = self.model_containers.names
         self.names_vegetables = self.model_vegetables.names
+
+        # Broadcaster for tf
+        self._br = TransformBroadcaster(self)
+
+        # Messge for publishing tf
+        self.tf = TransformStamped()
+        self.tf.header.frame_id = "oak_rgb_camera_optical_frame"
+        self.tf.child_frame_id = "oak-d-base-frame"
+        
 
     def process_detections(self, results, names, depth_frame, detections_list):
         for detection in results[0].boxes:
@@ -53,7 +63,21 @@ class ObjectLocationNode(OakSubscriber):
         # Process detections for vegetables
         self.process_detections(result_vegetables, self.names_vegetables, depth_frame, detections)
 
+        detections.sort(key=lambda x: x['confidence'], reverse=True)
+        detections_counter = {}
+        self.tf.header.stamp = self.get_clock().now().to_msg()
         for detection in detections:
+            class_name = detection['class_name']
+            if class_name not in detections_counter:
+                detections_counter[class_name] = 0
+            detections_counter[class_name] += 1
+
+            self.tf.child_frame_id = f"detection_{detection['class_name']}_{detections_counter[class_name]}"
+            self.tf.transform.translation.x = detection['spatials']['x']
+            self.tf.transform.translation.y = detection['spatials']['y']
+            self.tf.transform.translation.z = detection['spatials']['z']
+            self._br.sendTransform(self.tf)
+            
             self.get_logger().info(
                 f"Detected {detection['class_name']} with confidence {detection['confidence']:.2f} at "
                 f"bbox {detection['bbox']} with spatials {detection['spatials']}"
