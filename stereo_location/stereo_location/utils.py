@@ -1,4 +1,5 @@
 import cv2
+import math
 import numpy as np
 
 
@@ -84,6 +85,16 @@ class SpatialCalculator:
         }
         
         return result, (x, y)
+    
+    def length_pixels_to_meters(self, length_pixels, depth_m, angle_deg):
+        """Convert pixel length to meters using the axis angle and camera's focal lengths."""
+        angle_rad = math.radians(angle_deg)
+        fx = self.fx
+        fy = self.fy
+        # Effective focal length for the given angle
+        f_eff = math.sqrt((fx*math.cos(angle_rad))**2 + (fy * math.sin(angle_rad))**2)
+        length_meters = (length_pixels * depth_m) / f_eff
+        return length_meters
 
 
 class TextHelper:
