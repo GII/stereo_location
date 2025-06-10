@@ -5,6 +5,7 @@ from ament_index_python.packages import get_package_share_directory
 from pathlib import Path
 from copy import deepcopy
 from math import radians
+from collections import defaultdict
 
 import cv2
 from stereo_location.oak_subscriber import OakSubscriber
@@ -13,6 +14,7 @@ from geometry_msgs.msg import TransformStamped
 from sensor_msgs.msg import Image
 from tf2_ros import TransformBroadcaster
 from tf_transformations import quaternion_from_euler
+from stereo_location.utils import PositionKalmanFilterTimestamped
 
 class ObjectLocationNode(OakSubscriber):
     def __init__(self):
@@ -46,8 +48,16 @@ class ObjectLocationNode(OakSubscriber):
         self.obj_det_pub = self.create_publisher(ObjDetArray, f"{self.namespace}/object_tracker/detections", 10)
         self.image_pub = self.create_publisher(Image, f"{self.namespace}/object_tracker/image", 10)
 
+        self.kf_dict = defaultdict(lambda: PositionKalmanFilterTimestamped(
+            dim_x=6,  # State vector size: [x, y, z, vx, vy, vz]
+            dim_z=3,  # Measurement vector size: [x, y, z]
+            process_noise=1e-4,
+            measurement_noise=0.01,
+            state_covariance=1000.0,
+        ))
+
         
-    def process_detections(self, results, names, depth_frame, rgb_frame, detections_list, segmentation=False):
+    def process_detections(self, results, names, depth_frame, rgb_frame, detections_list, timestamp, segmentation=False):
         detections_counter = {}
 
         boxes = sorted(results[0].boxes, key=lambda x: x.conf[0], reverse=True)
@@ -65,9 +75,12 @@ class ObjectLocationNode(OakSubscriber):
             obj_msg.header.frame_id = f"detection_{class_name}_{detections_counter[class_name]}"
             obj_msg.class_name = class_name
             obj_msg.confidence = float(confidence)
+            kf = self.kf_dict[class_name]
             if segmentation:
                 segmentation_result = self.segment_object(rgb_frame, depth_frame, roi)
                 spatials, _ = self.spatial_calc.calc_spatials(depth_frame, segmentation_result['centroid'])
+                filtered_position = kf.update_kalman_filter(
+                    np.array([spatials['x'], spatials['y'], spatials['z']]), timestamp)
                 major_length = self.spatial_calc.length_pixels_to_meters(segmentation_result['major_axis'], spatials['z'], segmentation_result['orientation'])
                 minor_length = self.spatial_calc.length_pixels_to_meters(segmentation_result['minor_axis'], spatials['z'], segmentation_result['orientation'])
                 self.get_logger().debug(
@@ -82,9 +95,9 @@ class ObjectLocationNode(OakSubscriber):
                 obj_msg.bounding_box.y_min = float(segmentation_result['bbox'][1])
                 obj_msg.bounding_box.x_max = float(segmentation_result['bbox'][2])
                 obj_msg.bounding_box.y_max = float(segmentation_result['bbox'][3])
-                obj_msg.position.x = float(spatials['x'])
-                obj_msg.position.y = float(spatials['y'])
-                obj_msg.position.z = float(spatials['z'])
+                obj_msg.position.x = float(filtered_position[0])
+                obj_msg.position.y = float(filtered_position[1])
+                obj_msg.position.z = float(filtered_position[2])
                 obj_msg.dimensions.orientation = float(segmentation_result['orientation'])
                 obj_msg.dimensions.major_dim = float(major_length)
                 obj_msg.dimensions.minor_dim = float(minor_length)
@@ -92,16 +105,18 @@ class ObjectLocationNode(OakSubscriber):
                 mask = segmentation_result['mask']
             else:
                 spatials, _ = self.spatial_calc.calc_spatials(depth_frame, (np.mean([x1, x2]), np.mean([y1, y2])))
+                filtered_position = kf.update_kalman_filter(
+                    np.array([spatials['x'], spatials['y'], spatials['z']]), timestamp)
                 obj_msg.bounding_box.x_min = float(x1)
                 obj_msg.bounding_box.y_min = float(y1)
                 obj_msg.bounding_box.x_max = float(x2)
                 obj_msg.bounding_box.y_max = float(y2)
-                obj_msg.position.x = float(spatials['x'])
-                obj_msg.position.y = float(spatials['y'])
-                obj_msg.position.z = float(spatials['z'])
-                obj_msg.dimensions.orientation = float(segmentation_result['orientation'])
-                obj_msg.dimensions.major_dim = float(major_length)
-                obj_msg.dimensions.minor_dim = float(minor_length)
+                obj_msg.position.x = float(filtered_position[0])
+                obj_msg.position.y = float(filtered_position[1])
+                obj_msg.position.z = float(filtered_position[2])
+                obj_msg.dimensions.orientation = 0.0
+                obj_msg.dimensions.major_dim = float(max(x2 - x1, y2 - y1))
+                obj_msg.dimensions.minor_dim = float(min(x2 - x1, y2 - y1)) 
             
 
             detections_list.append({
@@ -242,14 +257,14 @@ class ObjectLocationNode(OakSubscriber):
                 annotated[y1:y2, x1:x2] = overlay
         return annotated
 
-    def process_frames(self, rgb_frame, depth_frame):
+    def process_frames(self, rgb_frame, depth_frame, timestamp):
         result_containers = self.model_containers.predict(rgb_frame, stream=False, conf=0.5)
         result_vegetables = self.model_vegetables.predict(rgb_frame, stream=False, conf=0.5)
         detections = []
 
         # Process detections for containers and vegetables
-        self.process_detections(result_containers, self.names_containers, depth_frame, rgb_frame, detections)
-        self.process_detections(result_vegetables, self.names_vegetables, depth_frame, rgb_frame, detections, segmentation=True)
+        self.process_detections(result_containers, self.names_containers, depth_frame, rgb_frame, detections, timestamp)
+        self.process_detections(result_vegetables, self.names_vegetables, depth_frame, rgb_frame, detections, timestamp, segmentation=True)
 
         # Obtain annotated image
         annotated_image = self.annotate_image(rgb_frame, detections, draw_mask=True)

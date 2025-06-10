@@ -2,6 +2,8 @@ import cv2
 import math
 import numpy as np
 
+from filterpy.kalman import KalmanFilter
+from rclpy.time import Time
 
 class SpatialCalculator:
     def __init__(self, camera_info=None, correction_factor=0.924836601, logger=None):
@@ -112,3 +114,68 @@ class TextHelper:
         
     def point(self, frame, position, size, color=(70, 255, 70)):
         cv2.circle(frame, position, size, color, 2)
+
+
+class PositionKalmanFilterTimestamped:
+
+    def __init__(
+        self,
+        dim_x,
+        dim_z,
+        velocity_indices=None,   # indices in state vector that are velocities
+        output_indices=None,      # indices in state vector to return as output
+        process_noise=1e-4,
+        measurement_noise=0.01,
+        state_covariance=1000.,
+    ):
+        self.kf = KalmanFilter(dim_x=dim_x, dim_z=dim_z)
+        self.kf.x = np.zeros(dim_x)
+        self.kf.P *= state_covariance
+        self.kf.H = np.hstack([np.eye(dim_z), np.zeros((dim_z, dim_x - dim_z))])
+        self.kf.R = np.eye(dim_z) * measurement_noise
+        self.kf.Q = np.eye(dim_x) * process_noise
+        self.last_time = 0.
+        self.initialized = False
+
+        # Default: assume first half are positions, second half are velocities
+        if velocity_indices is None:
+            self.velocity_indices = list(range(dim_x // 2, dim_x))
+        else:
+            self.velocity_indices = velocity_indices
+
+        # Default: output first dim_z states (positions)
+        if output_indices is None:
+            self.output_indices = list(range(dim_z))
+        else:
+            self.output_indices = output_indices
+
+        # For F update: map each velocity index to its corresponding position index
+        self.position_indices = [
+            i - (self.velocity_indices[0] - self.output_indices[0])
+            for i in self.velocity_indices
+        ]
+
+    def update_kalman_filter(self, measurement, timestamp):
+        # Flatten the measurement to ensure it is a 1D array
+        measurement_flat = measurement.flatten()
+        current_time = Time.from_msg(timestamp).nanoseconds / 1e9  # Convert to seconds
+        if not self.initialized:
+            # Initialize the Kalman filter state with the first measurement
+            self.kf.x[:len(measurement_flat)] = measurement_flat
+            self.last_time = current_time
+            self.initialized = True
+            return self.kf.x[self.output_indices]
+        dt = current_time - self.last_time
+        self.last_time = current_time
+
+        # Update F with current dt for position-velocity pairs
+        F = np.eye(self.kf.dim_x)
+        for pos_idx, vel_idx in zip(self.position_indices, self.velocity_indices):
+            F[pos_idx, vel_idx] = dt
+        self.kf.F = F
+
+        self.kf.predict()
+        self.kf.update(measurement_flat)
+
+        # Return only the requested output indices
+        return self.kf.x[self.output_indices]

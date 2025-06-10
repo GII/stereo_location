@@ -66,7 +66,7 @@ class OakSubscriber(Node):
             
             # Synchronize messages
             self.ts = message_filters.ApproximateTimeSynchronizer(
-                [self.rgb_sub, self.depth_sub], 10, 1)
+                [self.rgb_sub, self.depth_sub], 10, 0.1)
             self.ts.registerCallback(self.image_callback)
             
             
@@ -88,6 +88,9 @@ class OakSubscriber(Node):
             
             # Important: Ensure proper depth data format
             depth_frame = self.bridge.imgmsg_to_cv2(depth_msg, desired_encoding="passthrough")
+
+            # Obtain timestamp from the RGB message
+            timestamp = rgb_msg.header.stamp 
             
             # Check depth encoding and convert if necessary
             if depth_msg.encoding == "16UC1" or depth_frame.dtype == np.uint16:
@@ -103,7 +106,7 @@ class OakSubscriber(Node):
                 
             # Process images with lock to avoid UI conflicts
             with self.lock:
-                self.process_frames(rgb_frame, depth_frame)
+                self.process_frames(rgb_frame, depth_frame, timestamp)
                 
         except Exception as e:
             tb_str = traceback.format_exc()

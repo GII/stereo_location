@@ -2,29 +2,33 @@
   ros__parameters:
     camera:
       i_nn_type: none
-      i_laser_dot_brightness: 750
+      i_laser_dot_brightness: 1000
       i_enable_diagnostics: true
       i_enable_imu: false
     rgb:
       i_enable_nn: false
       i_resolution: 1080P
-      i_fps: 30.0
+      i_fps: 15.0
       i_output_isp: true
       r_set_man_focus: true
       r_focus: 121
     right:
-      i_fps: 30.0
+      i_fps: 15.0
     left:
-      i_fps: 30.0
+      i_fps: 15.0
     stereo:
       i_align_depth: true
       i_subpixel: true
-      i_depth_preset: HIGH_DENSITY
+      i_depth_preset: HIGH_ACCURACY
       i_lr_check: true
       i_enable_spatial_nn: false
+      i_enable_temporal_filter: true
+      i_temporal_filter_alpha: 0.2
+      i_temporal_filter_delta: 15
+      i_temporal_filter_persistency: VALID_2_IN_LAST_4
       # i_width: 1920
       # i_height: 1080
-      i_fps: 30.0
+      i_fps: 15.0
       i_publish_synced_rect_pair: false
       i_board_socket_id: 2
       i_right_rect_publish_topic: true
